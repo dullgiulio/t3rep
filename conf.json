@@ -1,0 +1,9 @@
+{
+	"Query": "SELECT l.userid,b.username,b.email,b.realName,COUNT(*) AS actions\nFROM sys_log l JOIN be_users b ON b.uid = l.userid\nWHERE l.error = 0 AND l.tstamp >= UNIX_TIMESTAMP(?) AND l.tstamp <= UNIX_TIMESTAMP(?)\nGROUP BY l.userid",
+	"Fields": 5,
+	"Months": 2,
+	"Directory": "/var/www/usage-reports",
+	"Systems": {
+		"sys-name": "User:Password@tcp(Host:3306)/Database"
+	}
+}

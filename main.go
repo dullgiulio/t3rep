@@ -31,18 +31,17 @@ func newConf() *conf {
 	}
 }
 
-func loadConf(fname string) (*conf, error) {
-	cf := newConf()
+func (c *conf) load(fname string) error {
 	fh, err := os.Open(fname)
 	if err != nil {
-		return nil, fmt.Errorf("cannot open configuration file: %v", err)
+		return fmt.Errorf("cannot open configuration file: %v", err)
 	}
 	defer fh.Close()
 	dec := json.NewDecoder(fh)
-	if err := dec.Decode(cf); err != nil {
-		return nil, fmt.Errorf("cannot decode JSON configuration: %v", err)
+	if err := dec.Decode(c); err != nil {
+		return fmt.Errorf("cannot decode JSON configuration: %v", err)
 	}
-	return cf, nil
+	return nil
 }
 
 func formatCSV(buf *bytes.Buffer, fields []string) []byte {
@@ -207,7 +206,32 @@ type logs struct {
 	info *log.Logger
 }
 
+func work(t *task, logs *logs) error {
+	if err := t.exec(logs); err != nil {
+		return fmt.Errorf("creating report: %v", err)
+	}
+	return nil
+}
+
+func run(sem chan struct{}, cf *conf, logs *logs, now time.Time) {
+	errch := make(chan error, len(cf.Systems))
+	for name, dsn := range cf.Systems {
+		go func(name, dsn string) {
+			sem <- struct{}{}
+			t := newTask(now, name, dsn, cf)
+			errch <- work(t, logs)
+			<-sem
+		}(name, dsn)
+	}
+	for i := 0; i < len(cf.Systems); i++ {
+		if err := <-errch; err != nil {
+			logs.err.Printf("fatal: %v", err)
+		}
+	}
+}
+
 func main() {
+	parallel := flag.Int("parallel", 0, "Number of concurrent report creations")
 	verbose := flag.Bool("verbose", false, "Show information messages for debugging")
 	flag.Parse()
 	logs := &logs{
@@ -221,15 +245,13 @@ func main() {
 	if cfile == "" {
 		logs.err.Fatal("usage: t3rep CONFFILE")
 	}
-	cf, err := loadConf(cfile)
-	if err != nil {
+	cf := newConf()
+	if err := cf.load(cfile); err != nil {
 		logs.err.Fatalf("fatal: cannot start: %v", err)
 	}
-	now := time.Now()
-	for name, dsn := range cf.Systems {
-		t := newTask(now, name, dsn, cf)
-		if err = t.exec(logs); err != nil {
-			logs.err.Fatalf("fatal: creating report: %v", err)
-		}
+	if *parallel > 0 {
+		*parallel = 1
 	}
+	sem := make(chan struct{}, *parallel)
+	run(sem, cf, logs, time.Now())
 }

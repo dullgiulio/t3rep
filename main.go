@@ -17,17 +17,22 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+type system struct {
+	Type string
+	DSN  string
+}
+
 type conf struct {
 	Query     string
 	Fields    int
 	Months    int
 	Directory string
-	Systems   map[string]string
+	Systems   map[string]system
 }
 
 func newConf() *conf {
 	return &conf{
-		Systems: make(map[string]string),
+		Systems: make(map[string]system),
 	}
 }
 
@@ -159,16 +164,18 @@ type task struct {
 	t      time.Time
 	name   string
 	dir    string
+	typ    string
 	dsn    string
 	query  string
 	months int
 	fields int
 }
 
-func newTask(t time.Time, name, dsn string, cf *conf) *task {
+func newTask(t time.Time, name, typ, dsn string, cf *conf) *task {
 	return &task{
 		t:      t,
 		name:   name,
+		typ:    typ,
 		dsn:    dsn,
 		dir:    cf.Directory,
 		query:  cf.Query,
@@ -178,7 +185,7 @@ func newTask(t time.Time, name, dsn string, cf *conf) *task {
 }
 
 func (t *task) exec(l *logs) error {
-	db, err := sql.Open("mysql", t.dsn)
+	db, err := sql.Open(t.typ, t.dsn)
 	if err != nil {
 		return fmt.Errorf("%s: cannot connect to database: %v", t.name, err)
 	}
@@ -215,13 +222,18 @@ func work(t *task, logs *logs) error {
 
 func run(sem chan struct{}, cf *conf, logs *logs, now time.Time) {
 	errch := make(chan error, len(cf.Systems))
-	for name, dsn := range cf.Systems {
-		go func(name, dsn string) {
+	for name, sys := range cf.Systems {
+		dsn := sys.DSN
+		typ := strings.ToLower(sys.Type)
+		if typ == "" {
+			typ = "mysql"
+		}
+		go func(name, typ, dsn string) {
 			sem <- struct{}{}
-			t := newTask(now, name, dsn, cf)
+			t := newTask(now, name, typ, dsn, cf)
 			errch <- work(t, logs)
 			<-sem
-		}(name, dsn)
+		}(name, typ, dsn)
 	}
 	for i := 0; i < len(cf.Systems); i++ {
 		if err := <-errch; err != nil {
@@ -249,7 +261,7 @@ func main() {
 	if err := cf.load(cfile); err != nil {
 		logs.err.Fatalf("fatal: cannot start: %v", err)
 	}
-	if *parallel > 0 {
+	if *parallel <= 0 {
 		*parallel = 1
 	}
 	sem := make(chan struct{}, *parallel)

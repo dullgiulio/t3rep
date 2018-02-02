@@ -4,6 +4,9 @@
 	"Months": 2,
 	"Directory": "/var/www/usage-reports",
 	"Systems": {
-		"sys-name": "User:Password@tcp(Host:3306)/Database"
+		"sys-name": {
+			"Type": "mysql",
+			"DSN":  "User:Password@tcp(Host:3306)/Database"
+		}
 	}
 }
